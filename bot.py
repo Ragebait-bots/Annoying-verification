@@ -77,6 +77,19 @@ def init_db():
                 PRIMARY KEY (guild_id, user_id)
             )
         """)
+        
+        columns = {
+            row["name"]
+            for row in con.execute(
+                "PRAGMA table_info(member_state)"
+            ).fetchall()
+        }
+
+        if "thread_id" not in columns:
+            con.execute(
+                "ALTER TABLE member_state ADD COLUMN thread_id INTEGER"
+            )
+
 
 
 def token_digest(token):
@@ -90,6 +103,51 @@ def state_for(guild_id, user_id):
             (guild_id, user_id),
         ).fetchone()
         return dict(row) if row else None
+        
+def save_thread_id(guild_id, user_id, thread_id):
+    with db_lock, db() as con:
+        con.execute(
+            """UPDATE member_state SET thread_id=?
+               WHERE guild_id=? AND user_id=?""",
+            (thread_id, guild_id, user_id),
+        )
+
+
+async def close_verification_thread(guild_id, user_id):
+    state = state_for(guild_id, user_id)
+
+    if not state or not state.get("thread_id"):
+        print(f"No saved verification thread for member {user_id}")
+        return
+
+    thread_id = state["thread_id"]
+
+    try:
+        thread = (
+            bot.get_channel(thread_id)
+            or await bot.fetch_channel(thread_id)
+        )
+
+        if isinstance(thread, discord.Thread):
+            await thread.delete(
+                reason="Member completed verification"
+            )
+            print(f"Deleted verification thread {thread_id}")
+
+    except discord.NotFound:
+        print(f"Thread {thread_id} was already deleted.")
+
+    except discord.HTTPException as exc:
+        print(f"Could not delete thread {thread_id}: {exc}")
+        return
+
+    with db_lock, db() as con:
+        con.execute(
+            """UPDATE member_state SET thread_id=NULL
+               WHERE guild_id=? AND user_id=? AND thread_id=?""",
+            (guild_id, user_id, thread_id),
+        )
+
 
 
 def create_challenge(guild_id, user_id, now):
@@ -306,6 +364,11 @@ def api_complete():
             bot.loop,
         )
         future.result(timeout=15)
+        close_future = asyncio.run_coroutine_threadsafe(
+    close_verification_thread(guild_id, user_id),
+    bot.loop,
+)
+close_future.result(timeout=15)
     except Exception:
         app.logger.exception("Failed to assign Verified role")
         return jsonify({
@@ -365,6 +428,7 @@ async def send_challenge(member, now):
             auto_archive_duration=1440,
             reason="Private hourly verification",
         )
+        save_thread_id(member.guild.id, member.id, thread.id)
 
         await thread.add_user(member)
 
