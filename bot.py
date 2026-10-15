@@ -263,15 +263,57 @@ def verify_page(token):
     return response
 
 
+
 @app.post("/api/complete")
 def api_complete():
     data = request.get_json(silent=True) or {}
     token = data.get("token", "")
     completed = data.get("completed")
+
     if not isinstance(token, str) or len(token) > 100 or completed != 100:
-        return jsonify({"ok": False, "message": "Please click all 100 circles first."}), 400
+        return jsonify({
+            "ok": False,
+            "message": "Please click all 100 circles first."
+        }), 400
+
+    digest = token_digest(token)
+
+    with db_lock, db() as con:
+        row = con.execute(
+            """SELECT guild_id, user_id FROM member_state
+               WHERE token_hash=?""",
+            (digest,),
+        ).fetchone()
+
+    if row is None:
+        return jsonify({
+            "ok": False,
+            "message": "This verification link is invalid or has already been used."
+        }), 400
+
+    guild_id = row["guild_id"]
+    user_id = row["user_id"]
+
     ok, message = complete_challenge(token)
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+
+    if not ok:
+        return jsonify({"ok": False, "message": message}), 400
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(
+            activate_verified(guild_id, user_id),
+            bot.loop,
+        )
+        future.result(timeout=15)
+    except Exception:
+        app.logger.exception("Failed to assign Verified role")
+        return jsonify({
+            "ok": False,
+            "message": "Verification was recorded, but role assignment failed. Please contact a server moderator."
+        }), 500
+
+    return jsonify({"ok": True, "message": message}), 200
+
 
 
 class FlaskThread(threading.Thread):
