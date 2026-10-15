@@ -455,6 +455,26 @@ async def on_ready():
 
 
 @bot.event
+async def on_member_join(member):
+    if member.guild.id != GUILD_ID or member.bot:
+        return
+
+    allowed_role = member.guild.get_role(ALLOWED_ROLE_ID)
+
+    if allowed_role is None:
+        print("Allowed role not found. Check ALLOWED_ROLE_ID.")
+        return
+
+    try:
+        await member.add_roles(
+            allowed_role,
+            reason="New member must complete verification",
+        )
+        print(f"Assigned Allowed role to {member.id}")
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"Could not assign Allowed role to {member.id}: {exc}")
+
+@bot.event
 async def on_member_remove(member):
     with db_lock, db() as con:
         con.execute(
