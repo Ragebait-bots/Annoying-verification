@@ -346,46 +346,100 @@ async def send_challenge(member, now):
         print(f"Could not DM member {member.id}; they may have DMs disabled.")
 
 
+
 @tasks.loop(minutes=1)
 async def verification_scheduler():
-    await bot.wait_until_ready()
     guild = bot.get_guild(GUILD_ID)
+
     if guild is None:
-        print(f"Guild {GUILD_ID} is unavailable; check GUILD_ID and bot membership.")
-        return
-    now = time.time()
-    role = guild.get_role(ROLE_ID)
-    if role is None:
-        print(f"Role {ROLE_ID} not found in guild {GUILD_ID}.")
+        print(f"Guild {GUILD_ID} is unavailable.")
         return
 
-    for member in list(role.members):
+    allowed_role = guild.get_role(ALLOWED_ROLE_ID)
+    verified_role = guild.get_role(VERIFIED_ROLE_ID)
+
+    if allowed_role is None or verified_role is None:
+        print("Allowed or Verified role not found. Check role IDs.")
+        return
+
+    now = time.time()
+
+    for member in list(guild.members):
+        if member.bot:
+            continue
+
         state = state_for(guild.id, member.id)
 
-        if state and state["token_hash"] and state["deadline"] and now > state["deadline"]:
+        # Verified members lose access after one hour.
+        if verified_role in member.roles:
+            last_verified = state["last_verified"] if state else None
+
+            if (
+                last_verified is not None
+                and now - last_verified >= CYCLE_SECONDS
+            ):
+                try:
+                    await member.remove_roles(
+                        verified_role,
+                        reason="One-hour verification period expired",
+                    )
+                    if allowed_role not in member.roles:
+                        await member.add_roles(
+                            allowed_role,
+                            reason="Verification required again",
+                        )
+
+                    # Send the next verification challenge.
+                    await send_challenge(member, now)
+                    await asyncio.sleep(0.25)
+
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    print(
+                        f"Could not expire roles for {member.id}: {exc}"
+                    )
+
+            continue
+
+        # Only members with Allowed need to complete verification.
+        if allowed_role not in member.roles:
+            continue
+
+        if (
+            state
+            and state["token_hash"]
+            and state["deadline"]
+            and now > state["deadline"]
+        ):
             clear_expired(guild.id, member.id)
+
             try:
                 await member.send(
-                    "⚠️ You missed your 15-minute verification deadline. "
-                    "Your role has **not** been removed. You'll be prompted again next cycle."
+                    "⚠️ Your 15-minute verification deadline expired. "
+                    "Your role has not been removed. "
+                    "You'll be prompted again next cycle."
                 )
             except (discord.Forbidden, discord.HTTPException):
-                print(f"Could not DM deadline warning to member {member.id}.")
-            # State has a recent last_prompt, so don't immediately send another challenge.
+                print(f"Could not DM member {member.id}.")
+
             continue
 
         if state and state["token_hash"]:
-            continue  # an active challenge already exists
+            continue
 
         last_verified = state["last_verified"] if state else None
         last_prompt = state["last_prompt"] if state else None
-        anchor = max(x for x in (last_verified, last_prompt) if x is not None) if (
-            last_verified is not None or last_prompt is not None
-        ) else None
+
+        anchors = [
+            value
+            for value in (last_verified, last_prompt)
+            if value is not None
+        ]
+        anchor = max(anchors) if anchors else None
 
         if anchor is None or now - anchor >= CYCLE_SECONDS:
             await send_challenge(member, now)
-            await asyncio.sleep(0.25)  # modestly space out DMs
+            await asyncio.sleep(0.25)
+
 
 
 @verification_scheduler.before_loop
