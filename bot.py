@@ -15,7 +15,8 @@ from werkzeug.serving import make_server
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
-ROLE_ID = int(os.environ["ROLE_ID"])
+ALLOWED_ROLE_ID = int(os.environ["ALLOWED_ROLE_ID"])
+VERIFIED_ROLE_ID = int(os.environ["VERIFIED_ROLE_ID"])
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
 PORT = int(os.environ.get("PORT", "10000"))
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "verification.sqlite3")
