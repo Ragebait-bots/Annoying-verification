@@ -367,8 +367,8 @@ def api_complete():
         close_future = asyncio.run_coroutine_threadsafe(
     close_verification_thread(guild_id, user_id),
     bot.loop,
-)
-close_future.result(timeout=15)
+        )
+        close_future.result(timeout=15)
     except Exception:
         app.logger.exception("Failed to assign Verified role")
         return jsonify({
