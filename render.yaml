@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: hourly-role-verification
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: ROLE_ID
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DATABASE_PATH
+        value: verification.sqlite3
