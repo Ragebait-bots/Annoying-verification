@@ -27,6 +27,32 @@ intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+async def activate_verified(guild_id, user_id):
+    guild = bot.get_guild(guild_id)
+    if guild is None:
+        raise RuntimeError(f"Guild {guild_id} not found")
+
+    member = guild.get_member(user_id)
+    if member is None:
+        member = await guild.fetch_member(user_id)
+
+    allowed_role = guild.get_role(ALLOWED_ROLE_ID)
+    verified_role = guild.get_role(VERIFIED_ROLE_ID)
+
+    if allowed_role is None or verified_role is None:
+        raise RuntimeError("Allowed or Verified role not found")
+
+    if allowed_role in member.roles:
+        await member.remove_roles(
+            allowed_role, reason="Member completed verification"
+        )
+
+    if verified_role not in member.roles:
+        await member.add_roles(
+            verified_role, reason="Member completed verification"
+        )
+
+
 app = Flask(__name__)
 db_lock = threading.RLock()
 
