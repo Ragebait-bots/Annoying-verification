@@ -15,6 +15,7 @@ from werkzeug.serving import make_server
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
+VERIFICATION_CHANNEL_ID = int(os.environ["VERIFICATION_CHANNEL_ID"])
 ALLOWED_ROLE_ID = int(os.environ["ALLOWED_ROLE_ID"])
 VERIFIED_ROLE_ID = int(os.environ["VERIFIED_ROLE_ID"])
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
@@ -325,25 +326,64 @@ class FlaskThread(threading.Thread):
         self.server.serve_forever()
 
 
+
 async def send_challenge(member, now):
-    token, deadline = create_challenge(member.guild.id, member.id, now)
+    token, deadline = create_challenge(
+        member.guild.id, member.id, now
+    )
+
     link = f"{BASE_URL}/verify/{quote(token, safe='')}"
-    deadline_text = datetime.fromtimestamp(deadline, timezone.utc).strftime("%H:%M UTC")
+    deadline_text = datetime.fromtimestamp(
+        deadline, timezone.utc
+    ).strftime("%H:%M UTC")
+
     embed = discord.Embed(
         title="Hourly verification required",
         description=(
-            "Click the link below and complete the 100-circle challenge within **15 minutes**.\n\n"
+            "Complete the 100-circle challenge within **15 minutes**.\n\n"
             f"[Open verification challenge]({link})\n\n"
-            f"Deadline: **{deadline_text}**. If you miss it, you'll receive a warning; "
-            "your role will not be removed."
+            f"Deadline: **{deadline_text} UTC**."
         ),
         color=discord.Color.blurple(),
     )
+
     try:
-        await member.send(embed=embed)
-    except (discord.Forbidden, discord.HTTPException):
-        # Keep the challenge timer; tell staff in the service logs instead of spamming.
-        print(f"Could not DM member {member.id}; they may have DMs disabled.")
+        channel = (
+            bot.get_channel(VERIFICATION_CHANNEL_ID)
+            or await bot.fetch_channel(VERIFICATION_CHANNEL_ID)
+        )
+
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(
+                "VERIFICATION_CHANNEL_ID must be a text channel."
+            )
+
+        thread = await channel.create_thread(
+            name=f"verify-{member.id}",
+            type=discord.ChannelType.private_thread,
+            invitable=False,
+            auto_archive_duration=1440,
+            reason="Private hourly verification",
+        )
+
+        await thread.add_user(member)
+
+        await thread.send(
+            content=f"{member.mention} Please complete your verification here.",
+            embed=embed,
+        )
+
+        print(
+            f"Verification challenge posted in private thread "
+            f"{thread.id} for member {member.id}"
+        )
+
+    except (discord.HTTPException, RuntimeError) as exc:
+        print(
+            f"Could not create verification thread for "
+            f"{member.id}: {exc}"
+        )
+
 
 
 
